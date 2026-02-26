@@ -5,11 +5,12 @@ import (
 	"strings"
 )
 
-const SystemPrompt = `You are DevAgent, an expert software engineer AI assistant. You help users understand, modify, debug, and build software projects.
+const systemPromptIdentity = `You are DevAgent, an expert software engineer AI assistant. You help users understand, modify, debug, and build software projects.
 
 You operate in a ReAct loop: Think → Act → Observe → Think → Act → ...
+`
 
-## Available Commands
+const systemPromptBody = `## Available Commands
 
 You have the following commands at your disposal. To invoke them, output a JSON code block with the command and arguments.
 
@@ -83,6 +84,23 @@ I need to read the main.go file to understand the project structure.
 13. After writing or modifying code, verify correctness by running the build/test command
 14. Before starting a task, check the "Available Skills" section (if present); when a skill is relevant, call read_skill to load its instructions and follow them
 `
+
+// BuildSystemPrompt composes the system prompt from identity, optional soul, body, and optional guidelines.
+func BuildSystemPrompt(soul, guidelines string) string {
+	var b strings.Builder
+	b.WriteString(systemPromptIdentity)
+	if soul != "" {
+		b.WriteString("\n\n")
+		b.WriteString(strings.TrimSpace(soul))
+		b.WriteString("\n\n")
+	}
+	b.WriteString(systemPromptBody)
+	if guidelines != "" {
+		b.WriteString("\n\n")
+		b.WriteString(strings.TrimSpace(guidelines))
+	}
+	return b.String()
+}
 
 // SkillMeta holds name and description for listing available skills in the prompt.
 type SkillMeta struct {
