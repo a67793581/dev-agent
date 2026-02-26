@@ -112,6 +112,12 @@ Examples:
 	skillDirs := buildSkillDirs(absProject, *skillsFlag)
 	soul := prompt.ResolvePromptFile(*soulFlag, absProject, "SOUL.md")
 	guidelines := prompt.ResolvePromptFile(*guidelinesFlag, absProject, "GUIDELINES.md")
+	if *soulFlag != "" && soul == "" {
+		fmt.Fprintf(os.Stderr, "⚠️  Soul file not found or unreadable: %s\n", *soulFlag)
+	}
+	if *guidelinesFlag != "" && guidelines == "" {
+		fmt.Fprintf(os.Stderr, "⚠️  Guidelines file not found or unreadable: %s\n", *guidelinesFlag)
+	}
 	ag := agent.New(client, absProject, *verbose, skillDirs, soul, guidelines)
 
 	if *taskFlag != "" {
