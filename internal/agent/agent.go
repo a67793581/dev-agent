@@ -5,6 +5,7 @@ import (
 	"devagent/internal/llm"
 	"devagent/internal/parser"
 	"devagent/internal/prompt"
+	"devagent/internal/skill"
 	"devagent/internal/tools"
 	"fmt"
 	"os"
@@ -19,21 +20,23 @@ const (
 )
 
 type Agent struct {
-	client   *llm.Client
-	registry *tools.Registry
-	workDir  string
-	verbose  bool
+	client    *llm.Client
+	registry  *tools.Registry
+	workDir   string
+	verbose   bool
+	skillDirs []string
 
 	messages   []llm.Message
 	totalUsage llm.Usage
 }
 
-func New(client *llm.Client, workDir string, verbose bool) *Agent {
+func New(client *llm.Client, workDir string, verbose bool, skillDirs []string) *Agent {
 	return &Agent{
-		client:   client,
-		registry: tools.DefaultRegistry(workDir),
-		workDir:  workDir,
-		verbose:  verbose,
+		client:    client,
+		registry:  tools.DefaultRegistry(workDir),
+		workDir:   workDir,
+		verbose:   verbose,
+		skillDirs: skillDirs,
 	}
 }
 
@@ -43,9 +46,22 @@ func (a *Agent) Verbose() bool           { return a.verbose }
 func (a *Agent) Run(ctx context.Context, task string) error {
 	fileTree := a.buildFileTree(a.workDir, "", 0, 3)
 
+	skills, err := skill.Discover(a.skillDirs)
+	if err != nil {
+		return fmt.Errorf("discover skills: %w", err)
+	}
+	if len(skills) > 0 {
+		a.registry.Register(tools.NewReadSkillTool(skills))
+	}
+
+	meta := make([]prompt.SkillMeta, len(skills))
+	for i := range skills {
+		meta[i] = prompt.SkillMeta{Name: skills[i].Name, Description: skills[i].Description}
+	}
+	userContent := prompt.BuildProjectContext(a.workDir, fileTree) + "\n\n" + prompt.BuildUserTask(task) + prompt.BuildSkillsContext(meta)
 	a.messages = []llm.Message{
 		{Role: "system", Content: prompt.SystemPrompt},
-		{Role: "user", Content: prompt.BuildProjectContext(a.workDir, fileTree) + "\n\n" + prompt.BuildUserTask(task)},
+		{Role: "user", Content: userContent},
 	}
 
 	fmt.Printf("\n🤖 DevAgent started (model: %s)\n", a.client.Model())
