@@ -16,12 +16,17 @@ type Message struct {
 	Content string `json:"content"`
 }
 
+type StreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
 type ChatRequest struct {
-	Model       string    `json:"model"`
-	Messages    []Message `json:"messages"`
-	Temperature float64   `json:"temperature,omitempty"`
-	MaxTokens   int       `json:"max_tokens,omitempty"`
-	Stream      bool      `json:"stream,omitempty"`
+	Model         string         `json:"model"`
+	Messages      []Message      `json:"messages"`
+	Temperature   float64        `json:"temperature,omitempty"`
+	MaxTokens     int            `json:"max_tokens,omitempty"`
+	Stream        bool           `json:"stream,omitempty"`
+	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
 }
 
 type Choice struct {
@@ -56,6 +61,7 @@ type StreamChoice struct {
 type StreamChunk struct {
 	ID      string         `json:"id"`
 	Choices []StreamChoice `json:"choices"`
+	Usage   *Usage         `json:"usage,omitempty"`
 }
 
 type Client struct {
@@ -151,11 +157,12 @@ func (c *Client) Chat(ctx context.Context, messages []Message) (string, Usage, e
 
 func (c *Client) ChatStream(ctx context.Context, messages []Message, onChunk func(content string)) (string, Usage, error) {
 	req := ChatRequest{
-		Model:       c.model,
-		Messages:    messages,
-		Temperature: 0.1,
-		MaxTokens:   16384,
-		Stream:      true,
+		Model:         c.model,
+		Messages:      messages,
+		Temperature:   0.1,
+		MaxTokens:     16384,
+		Stream:        true,
+		StreamOptions: &StreamOptions{IncludeUsage: true},
 	}
 
 	body, err := json.Marshal(req)
@@ -182,6 +189,7 @@ func (c *Client) ChatStream(ctx context.Context, messages []Message, onChunk fun
 	}
 
 	var fullContent bytes.Buffer
+	var usage Usage
 
 	scanner := NewSSEScanner(resp.Body)
 	for scanner.Scan() {
@@ -203,9 +211,12 @@ func (c *Client) ChatStream(ctx context.Context, messages []Message, onChunk fun
 				}
 			}
 		}
+		if chunk.Usage != nil {
+			usage = *chunk.Usage
+		}
 	}
 
-	return fullContent.String(), Usage{}, nil
+	return fullContent.String(), usage, nil
 }
 
 func (c *Client) Model() string {
