@@ -6,6 +6,7 @@ import (
 	"devagent/internal/agent"
 	"devagent/internal/config"
 	"devagent/internal/llm"
+	"devagent/internal/prompt"
 	"flag"
 	"fmt"
 	"os"
@@ -29,6 +30,8 @@ func main() {
 	showVersion := flag.Bool("version", false, "Show version")
 	taskFlag := flag.String("task", "", "Task to execute (if empty, enters interactive mode)")
 	skillsFlag := flag.String("skills", "", "Comma-separated paths to additional skill directories (default: <project>/.devagent/skills and ~/.devagent/skills)")
+	soulFlag := flag.String("soul", "", "Path to custom soul/identity prompt file (default: .devagent/SOUL.md in project or home)")
+	guidelinesFlag := flag.String("guidelines", "", "Path to custom guidelines prompt file (default: .devagent/GUIDELINES.md in project or home)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, `DevAgent v%s - AI-powered programming agent
@@ -56,6 +59,7 @@ Examples:
   devagent -project ./myapp -verbose              # verbose output
   devagent -env /path/to/.env -project ./myapp    # custom env file
   devagent -skills /path/to/skills,/other/skills  # additional skill directories
+  devagent -soul ./SOUL.md -guidelines ./GUIDELINES.md  # custom prompt files
 `)
 	}
 
@@ -106,7 +110,9 @@ Examples:
 	}()
 
 	skillDirs := buildSkillDirs(absProject, *skillsFlag)
-	ag := agent.New(client, absProject, *verbose, skillDirs)
+	soul := prompt.ResolvePromptFile(*soulFlag, absProject, "SOUL.md")
+	guidelines := prompt.ResolvePromptFile(*guidelinesFlag, absProject, "GUIDELINES.md")
+	ag := agent.New(client, absProject, *verbose, skillDirs, soul, guidelines)
 
 	if *taskFlag != "" {
 		if err := ag.Run(ctx, *taskFlag); err != nil {
@@ -115,7 +121,7 @@ Examples:
 		return
 	}
 
-	runInteractive(ctx, ag, absProject, skillDirs)
+	runInteractive(ctx, ag, absProject, skillDirs, soul, guidelines)
 }
 
 func buildSkillDirs(projectDir, skillsFlag string) []string {
@@ -137,7 +143,7 @@ func buildSkillDirs(projectDir, skillsFlag string) []string {
 	return dirs
 }
 
-func runInteractive(ctx context.Context, ag *agent.Agent, projectDir string, skillDirs []string) {
+func runInteractive(ctx context.Context, ag *agent.Agent, projectDir string, skillDirs []string, soul, guidelines string) {
 	fmt.Printf(`
 ╔══════════════════════════════════════════════════╗
 ║          DevAgent v%s - Interactive Mode        ║
@@ -171,7 +177,7 @@ func runInteractive(ctx context.Context, ag *agent.Agent, projectDir string, ski
 			continue
 		}
 
-		newAgent := agent.New(ag.LLMClient(), projectDir, ag.Verbose(), skillDirs)
+		newAgent := agent.New(ag.LLMClient(), projectDir, ag.Verbose(), skillDirs, soul, guidelines)
 
 		if err := newAgent.Run(ctx, input); err != nil {
 			fmt.Printf("❌ Error: %v\n", err)
