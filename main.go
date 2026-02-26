@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"devagent/internal/agent"
+	"devagent/internal/config"
 	"devagent/internal/llm"
 	"flag"
 	"fmt"
@@ -19,6 +20,7 @@ var (
 )
 
 func main() {
+	envFile := flag.String("env", "", "Path to .env file (default: .env in current directory)")
 	projectDir := flag.String("project", ".", "Path to the project directory")
 	model := flag.String("model", "", "OpenAI model name (default: gpt-4o, or OPENAI_MODEL env)")
 	baseURL := flag.String("base-url", "", "OpenAI API base URL (default: https://api.openai.com/v1, or OPENAI_BASE_URL env)")
@@ -37,15 +39,21 @@ Flags:
 `, version)
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, `
-Environment Variables:
+Environment Variables (can be set in .env file):
   OPENAI_API_KEY    OpenAI API key (required)
   OPENAI_BASE_URL   API base URL (optional)
   OPENAI_MODEL      Model name (optional, default: gpt-4o)
 
+.env file lookup order (first found wins, existing env vars are never overwritten):
+  1. File specified by -env flag
+  2. .env in current working directory
+  3. ~/.devagent.env in home directory
+
 Examples:
   devagent -project ./myapp -task "add error handling to all API endpoints"
-  devagent -project ./myapp                    # interactive mode
-  devagent -project ./myapp -verbose           # verbose output
+  devagent -project ./myapp                       # interactive mode
+  devagent -project ./myapp -verbose              # verbose output
+  devagent -env /path/to/.env -project ./myapp    # custom env file
 `)
 	}
 
@@ -54,6 +62,10 @@ Examples:
 	if *showVersion {
 		fmt.Printf("DevAgent v%s\n", version)
 		os.Exit(0)
+	}
+
+	if err := config.LoadEnv(*envFile); err != nil {
+		fatalf("%v", err)
 	}
 
 	absProject, err := filepath.Abs(*projectDir)
