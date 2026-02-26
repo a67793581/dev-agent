@@ -34,3 +34,4 @@ go.work.sum
 devagent
 devagent.exe
 myapp
+.DS_Store
