@@ -1,6 +1,9 @@
 package tools
 
-import "fmt"
+import (
+	"devagent/internal/sandbox"
+	"fmt"
+)
 
 type Result struct {
 	Success bool
@@ -13,13 +16,18 @@ type Tool interface {
 }
 
 type Registry struct {
-	tools map[string]Tool
+	tools   map[string]Tool
+	sandbox *sandbox.Sandbox
 }
 
 func NewRegistry() *Registry {
 	return &Registry{
 		tools: make(map[string]Tool),
 	}
+}
+
+func (r *Registry) SetSandbox(sb *sandbox.Sandbox) {
+	r.sandbox = sb
 }
 
 func (r *Registry) Register(t Tool) {
@@ -37,6 +45,16 @@ func (r *Registry) Execute(name string, args map[string]string) Result {
 		return Result{
 			Success: false,
 			Output:  fmt.Sprintf("unknown command: %s", name),
+		}
+	}
+	if r.sandbox != nil {
+		result := r.sandbox.Check(name, args)
+		if !result.Allow {
+			out := "blocked by sandbox"
+			if result.DenyErr != nil {
+				out = fmt.Sprintf("blocked by sandbox: %v", result.DenyErr)
+			}
+			return Result{Success: false, Output: out}
 		}
 	}
 	return tool.Execute(args)

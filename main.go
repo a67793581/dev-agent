@@ -6,8 +6,10 @@ import (
 	"devagent/internal/agent"
 	"devagent/internal/config"
 	"devagent/internal/llm"
+	"devagent/internal/sandbox"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -29,6 +31,7 @@ func main() {
 	showVersion := flag.Bool("version", false, "Show version")
 	taskFlag := flag.String("task", "", "Task to execute (if empty, enters interactive mode)")
 	skillsFlag := flag.String("skills", "", "Comma-separated paths to additional skill directories (default: <project>/.devagent/skills and ~/.devagent/skills)")
+	sandboxFlag := flag.String("sandbox", "normal", "Sandbox mode: permissive (block only dangerous) / normal (block + confirm high risk) / strict (confirm high+medium and writes)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, `DevAgent v%s - AI-powered programming agent
@@ -56,6 +59,7 @@ Examples:
   devagent -project ./myapp -verbose              # verbose output
   devagent -env /path/to/.env -project ./myapp    # custom env file
   devagent -skills /path/to/skills,/other/skills  # additional skill directories
+  devagent -sandbox strict   # require confirmation for risky and write operations
 `)
 	}
 
@@ -105,8 +109,19 @@ Examples:
 		cancel()
 	}()
 
+	sandboxCfg, err := sandbox.LoadConfig(absProject)
+	if err != nil {
+		log.Printf("Warning: loading sandbox config: %v (using defaults)", err)
+		sandboxCfg = nil
+	}
+	cliMode := ""
+	if *sandboxFlag != "" {
+		cliMode = *sandboxFlag
+	}
+	sb := sandbox.NewSandboxFromConfig(absProject, sandboxCfg, cliMode, sandbox.TerminalApproval())
+
 	skillDirs := buildSkillDirs(absProject, *skillsFlag)
-	ag := agent.New(client, absProject, *verbose, skillDirs)
+	ag := agent.New(client, absProject, *verbose, skillDirs, sb)
 
 	if *taskFlag != "" {
 		if err := ag.Run(ctx, *taskFlag); err != nil {
@@ -115,7 +130,7 @@ Examples:
 		return
 	}
 
-	runInteractive(ctx, ag, absProject, skillDirs)
+	runInteractive(ctx, ag, absProject, skillDirs, sb)
 }
 
 func buildSkillDirs(projectDir, skillsFlag string) []string {
@@ -137,7 +152,7 @@ func buildSkillDirs(projectDir, skillsFlag string) []string {
 	return dirs
 }
 
-func runInteractive(ctx context.Context, ag *agent.Agent, projectDir string, skillDirs []string) {
+func runInteractive(ctx context.Context, ag *agent.Agent, projectDir string, skillDirs []string, sb *sandbox.Sandbox) {
 	fmt.Printf(`
 ╔══════════════════════════════════════════════════╗
 ║          DevAgent v%s - Interactive Mode        ║
@@ -171,7 +186,7 @@ func runInteractive(ctx context.Context, ag *agent.Agent, projectDir string, ski
 			continue
 		}
 
-		newAgent := agent.New(ag.LLMClient(), projectDir, ag.Verbose(), skillDirs)
+		newAgent := agent.New(ag.LLMClient(), projectDir, ag.Verbose(), skillDirs, sb)
 
 		if err := newAgent.Run(ctx, input); err != nil {
 			fmt.Printf("❌ Error: %v\n", err)

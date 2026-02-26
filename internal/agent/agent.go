@@ -5,6 +5,7 @@ import (
 	"devagent/internal/llm"
 	"devagent/internal/parser"
 	"devagent/internal/prompt"
+	"devagent/internal/sandbox"
 	"devagent/internal/skill"
 	"devagent/internal/tools"
 	"fmt"
@@ -30,10 +31,14 @@ type Agent struct {
 	totalUsage llm.Usage
 }
 
-func New(client *llm.Client, workDir string, verbose bool, skillDirs []string) *Agent {
+func New(client *llm.Client, workDir string, verbose bool, skillDirs []string, sb *sandbox.Sandbox) *Agent {
+	reg := tools.DefaultRegistry(workDir)
+	if sb != nil {
+		reg.SetSandbox(sb)
+	}
 	return &Agent{
 		client:    client,
-		registry:  tools.DefaultRegistry(workDir),
+		registry:  reg,
 		workDir:   workDir,
 		verbose:   verbose,
 		skillDirs: skillDirs,
