@@ -41,6 +41,10 @@ You have the following commands at your disposal. To invoke them, output a JSON 
 - **done**: Signal that the task is complete
   Args: {"summary": "<summary_of_what_was_done>"}
 
+### Skills
+- **read_skill**: Load instructions from an available skill. When a skill is relevant to the user's task, use this to load its full instructions, then follow them.
+  Args: {"name": "<skill_name>"}
+
 ## Output Format
 
 For EACH step, you MUST:
@@ -77,7 +81,29 @@ I need to read the main.go file to understand the project structure.
 11. For small, targeted edits, prefer str_replace over write_file to avoid accidentally overwriting content
 12. Always read a file before editing it to understand its current content
 13. After writing or modifying code, verify correctness by running the build/test command
+14. Before starting a task, check the "Available Skills" section (if present); when a skill is relevant, call read_skill to load its instructions and follow them
 `
+
+// SkillMeta holds name and description for listing available skills in the prompt.
+type SkillMeta struct {
+	Name        string
+	Description string
+}
+
+// BuildSkillsContext formats the list of available skills for inclusion in the user message.
+// When a skill is relevant to the user's task, the agent should use read_skill to load its instructions.
+func BuildSkillsContext(skills []SkillMeta) string {
+	if len(skills) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n\n## Available Skills\n\n")
+	sb.WriteString("When a skill is relevant to the user's task, use `read_skill` to load its instructions, then follow them.\n\n")
+	for _, s := range skills {
+		sb.WriteString(fmt.Sprintf("- **%s**: %s\n", s.Name, s.Description))
+	}
+	return sb.String()
+}
 
 func BuildProjectContext(projectPath string, fileTree string) string {
 	return fmt.Sprintf(`## Current Project

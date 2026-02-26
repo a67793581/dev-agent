@@ -28,6 +28,7 @@ func main() {
 	verbose := flag.Bool("verbose", false, "Enable verbose output (show LLM streaming, tool details)")
 	showVersion := flag.Bool("version", false, "Show version")
 	taskFlag := flag.String("task", "", "Task to execute (if empty, enters interactive mode)")
+	skillsFlag := flag.String("skills", "", "Comma-separated paths to additional skill directories (default: <project>/.devagent/skills and ~/.devagent/skills)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, `DevAgent v%s - AI-powered programming agent
@@ -54,6 +55,7 @@ Examples:
   devagent -project ./myapp                       # interactive mode
   devagent -project ./myapp -verbose              # verbose output
   devagent -env /path/to/.env -project ./myapp    # custom env file
+  devagent -skills /path/to/skills,/other/skills  # additional skill directories
 `)
 	}
 
@@ -103,7 +105,8 @@ Examples:
 		cancel()
 	}()
 
-	ag := agent.New(client, absProject, *verbose)
+	skillDirs := buildSkillDirs(absProject, *skillsFlag)
+	ag := agent.New(client, absProject, *verbose, skillDirs)
 
 	if *taskFlag != "" {
 		if err := ag.Run(ctx, *taskFlag); err != nil {
@@ -112,10 +115,29 @@ Examples:
 		return
 	}
 
-	runInteractive(ctx, ag, absProject)
+	runInteractive(ctx, ag, absProject, skillDirs)
 }
 
-func runInteractive(ctx context.Context, ag *agent.Agent, projectDir string) {
+func buildSkillDirs(projectDir, skillsFlag string) []string {
+	// Priority: project-level, user-level, then custom (--skills)
+	var dirs []string
+	projectSkills := filepath.Join(projectDir, ".devagent", "skills")
+	dirs = append(dirs, projectSkills)
+	if home, err := os.UserHomeDir(); err == nil {
+		dirs = append(dirs, filepath.Join(home, ".devagent", "skills"))
+	}
+	if skillsFlag != "" {
+		for _, p := range strings.Split(skillsFlag, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				dirs = append(dirs, p)
+			}
+		}
+	}
+	return dirs
+}
+
+func runInteractive(ctx context.Context, ag *agent.Agent, projectDir string, skillDirs []string) {
 	fmt.Printf(`
 ╔══════════════════════════════════════════════════╗
 ║          DevAgent v%s - Interactive Mode        ║
@@ -149,11 +171,7 @@ func runInteractive(ctx context.Context, ag *agent.Agent, projectDir string) {
 			continue
 		}
 
-		newAgent := agent.New(
-			ag.LLMClient(),
-			projectDir,
-			ag.Verbose(),
-		)
+		newAgent := agent.New(ag.LLMClient(), projectDir, ag.Verbose(), skillDirs)
 
 		if err := newAgent.Run(ctx, input); err != nil {
 			fmt.Printf("❌ Error: %v\n", err)
