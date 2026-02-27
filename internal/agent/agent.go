@@ -26,22 +26,26 @@ type Agent struct {
 	workDir   string
 	verbose   bool
 	skillDirs []string
+	soul      string
+	guidelines string
 
 	messages   []llm.Message
 	totalUsage llm.Usage
 }
 
-func New(client *llm.Client, workDir string, verbose bool, skillDirs []string, sb *sandbox.Sandbox) *Agent {
+func New(client *llm.Client, workDir string, verbose bool, skillDirs []string, soul, guidelines string, sb *sandbox.Sandbox) *Agent {
 	reg := tools.DefaultRegistry(workDir)
 	if sb != nil {
 		reg.SetSandbox(sb)
 	}
 	return &Agent{
-		client:    client,
+		client:     client,
 		registry:  reg,
 		workDir:   workDir,
 		verbose:   verbose,
 		skillDirs: skillDirs,
+		soul:      soul,
+		guidelines: guidelines,
 	}
 }
 
@@ -64,11 +68,18 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 		meta[i] = prompt.SkillMeta{Name: skills[i].Name, Description: skills[i].Description}
 	}
 	userContent := prompt.BuildProjectContext(a.workDir, fileTree) + "\n\n" + prompt.BuildUserTask(task) + prompt.BuildSkillsContext(meta)
+	systemContent := prompt.BuildSystemPrompt(a.soul, a.guidelines)
 	a.messages = []llm.Message{
-		{Role: "system", Content: prompt.SystemPrompt},
+		{Role: "system", Content: systemContent},
 		{Role: "user", Content: userContent},
 	}
 
+	if a.verbose && a.soul != "" {
+		fmt.Printf("[Loaded custom soul prompt (%d chars)]\n", len(a.soul))
+	}
+	if a.verbose && a.guidelines != "" {
+		fmt.Printf("[Loaded custom guidelines (%d chars)]\n", len(a.guidelines))
+	}
 	fmt.Printf("\n🤖 DevAgent started (model: %s)\n", a.client.Model())
 	fmt.Printf("📁 Project: %s\n", a.workDir)
 	fmt.Printf("📋 Task: %s\n\n", task)
