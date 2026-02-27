@@ -5,7 +5,7 @@ BUILD_DIR   := bin
 LDFLAGS     := -s -w -X 'main.version=$(VERSION)'
 GOFLAGS     := -trimpath
 
-.PHONY: all build clean test lint run help
+.PHONY: all build clean test test-coverage lint run help
 
 all: build
 
@@ -18,6 +18,10 @@ clean:
 test:
 	$(GO) test ./... -v
 
+test-coverage:
+	$(GO) test ./internal/... -coverprofile=coverage.out -covermode=atomic
+	$(GO) tool cover -func=coverage.out
+
 lint:
 	golangci-lint run ./...
 
@@ -29,6 +33,7 @@ help:
 	@echo "  make build        Build the binary to $(BUILD_DIR)/$(APP_NAME)"
 	@echo "  make clean        Remove build artifacts"
 	@echo "  make test         Run all tests"
+	@echo "  make test-coverage Run tests with coverage (internal packages only)"
 	@echo "  make lint         Run golangci-lint"
 	@echo "  make run          Build and run (pass flags via ARGS=...)"
 	@echo "  make help         Show this help"

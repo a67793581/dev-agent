@@ -134,3 +134,71 @@ func TestBuildSkillsContext_MultipleSkills(t *testing.T) {
 		t.Error("output should contain second skill")
 	}
 }
+
+func TestBuildProjectContext(t *testing.T) {
+	got := BuildProjectContext("/project", "├── main.go\n└── pkg/\n")
+	if !strings.Contains(got, "Project path: /project") {
+		t.Error("should contain project path")
+	}
+	if !strings.Contains(got, "├── main.go") {
+		t.Error("should contain file tree")
+	}
+}
+
+func TestBuildUserTask(t *testing.T) {
+	got := BuildUserTask("Add tests")
+	if !strings.Contains(got, "## User Task") {
+		t.Error("should contain section header")
+	}
+	if !strings.Contains(got, "Add tests") {
+		t.Error("should contain task text")
+	}
+}
+
+func TestBuildObservation_Success(t *testing.T) {
+	got := BuildObservation("read_file", true, "line 1\nline 2")
+	if !strings.Contains(got, "read_file") || !strings.Contains(got, "SUCCESS") {
+		t.Error("should contain command and SUCCESS")
+	}
+	if !strings.Contains(got, "line 1") {
+		t.Error("should contain output")
+	}
+}
+
+func TestBuildObservation_Failed(t *testing.T) {
+	got := BuildObservation("shell", false, "exit code 1")
+	if !strings.Contains(got, "FAILED") {
+		t.Error("should contain FAILED")
+	}
+}
+
+func TestBuildObservation_Truncated(t *testing.T) {
+	long := strings.Repeat("x", 10000)
+	got := BuildObservation("read_file", true, long)
+	if !strings.Contains(got, "(output truncated)") {
+		t.Error("long output should be truncated")
+	}
+}
+
+func TestBuildDebugPrompt_WithoutTestCode(t *testing.T) {
+	got := BuildDebugPrompt("code", "error", "")
+	if !strings.Contains(got, "## Code Repair Task") {
+		t.Error("should contain section")
+	}
+	if !strings.Contains(got, "code") || !strings.Contains(got, "error") {
+		t.Error("should contain code and error")
+	}
+	if strings.Contains(got, "Test Code") {
+		t.Error("should not contain Test Code when testCode is empty")
+	}
+}
+
+func TestBuildDebugPrompt_WithTestCode(t *testing.T) {
+	got := BuildDebugPrompt("code", "error", "test code")
+	if !strings.Contains(got, "### Test Code") {
+		t.Error("should contain Test Code section")
+	}
+	if !strings.Contains(got, "test code") {
+		t.Error("should contain test code content")
+	}
+}

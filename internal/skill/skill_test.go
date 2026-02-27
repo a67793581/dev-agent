@@ -163,3 +163,37 @@ func TestLoadBody_InvalidPath(t *testing.T) {
 		t.Error("LoadBody with missing file should return error")
 	}
 }
+
+func TestDiscover_InvalidFrontmatter(t *testing.T) {
+	dir := t.TempDir()
+	content := `---
+name: [invalid yaml
+description: x
+---
+
+# Body
+`
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Discover([]string{dir})
+	if err == nil {
+		t.Error("Discover with invalid frontmatter YAML should return error")
+	}
+}
+
+func TestDiscover_SkillWithOnlyOneDelimiter(t *testing.T) {
+	dir := t.TempDir()
+	// Only one "---" in entire file so splitFrontmatter returns (nil, data); parseFrontmatter returns empty name -> skipped
+	content := "---\nname: x\n\nBody with no more triple-dash\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	skills, err := Discover([]string{dir})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(skills) != 0 {
+		t.Errorf("skill with only one --- has no valid frontmatter (need second ---), got %d skills", len(skills))
+	}
+}

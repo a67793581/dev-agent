@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -289,4 +290,152 @@ func TestGlobLikeToRegex(t *testing.T) {
 // compileGlobLikeForTest compiles GlobLikeToRegex for testing.
 func compileGlobLikeForTest(pat string) (*regexp.Regexp, error) {
 	return regexp.Compile(GlobLikeToRegex(pat))
+}
+
+func TestSandbox_Check_ShellEmptyCommand(t *testing.T) {
+	workDir := t.TempDir()
+	policy := &Policy{
+		Mode:    ModeNormal,
+		WorkDir: workDir,
+		Shell:   &ShellPolicy{},
+		Path:    &PathPolicy{},
+	}
+	sb := NewSandbox(policy)
+	result := sb.Check("shell", map[string]string{"command": ""})
+	if result.Allow {
+		t.Error("empty command should not be allowed")
+	}
+}
+
+func TestSandbox_Check_StrictModeWriteToolApproval(t *testing.T) {
+	workDir := t.TempDir()
+	approved := false
+	policy := &Policy{
+		Mode:    ModeStrict,
+		WorkDir: workDir,
+		Shell:   &ShellPolicy{},
+		Path:    &PathPolicy{},
+		ApproveFunc: func(action string) bool {
+			approved = true
+			return true
+		},
+	}
+	sb := NewSandbox(policy)
+	result := sb.Check("write_file", map[string]string{"path": "x.go"})
+	if !approved {
+		t.Error("ApproveFunc should be called in strict for write_file")
+	}
+	if !result.Allow {
+		t.Error("after approval should allow")
+	}
+}
+
+func TestSandbox_Check_StrictModeWriteToolDenied(t *testing.T) {
+	workDir := t.TempDir()
+	policy := &Policy{
+		Mode:    ModeStrict,
+		WorkDir: workDir,
+		Shell:   &ShellPolicy{},
+		Path:    &PathPolicy{},
+		ApproveFunc: func(action string) bool {
+			return false
+		},
+	}
+	sb := NewSandbox(policy)
+	result := sb.Check("write_file", map[string]string{"path": "x.go"})
+	if result.Allow {
+		t.Error("when ApproveFunc returns false should deny")
+	}
+	if result.ApprovalAction == "" {
+		t.Error("ApprovalAction should be set")
+	}
+}
+
+func TestSandbox_Check_ShellRiskMediumStrict(t *testing.T) {
+	workDir := t.TempDir()
+	policy := &Policy{
+		Mode:    ModeStrict,
+		WorkDir: workDir,
+		Shell: &ShellPolicy{
+			BlockPatterns:   DefaultShellBlockPatterns(),
+			ApprovePatterns: DefaultShellApprovePatterns(),
+		},
+		Path:       &PathPolicy{},
+		ApproveFunc: func(action string) bool { return true },
+	}
+	sb := NewSandbox(policy)
+	// RiskMedium in strict still requires approval for some commands; use a low-risk command to get Allow
+	result := sb.Check("shell", map[string]string{"command": "echo hi"})
+	if !result.Allow {
+		t.Errorf("low risk in strict should allow: %v", result.DenyErr)
+	}
+}
+
+func TestSandbox_Check_ShellLongCommandTruncateForPrompt(t *testing.T) {
+	workDir := t.TempDir()
+	// High-risk (approve) long command so approval is required and truncateForPrompt(longCmd, 200) is used
+	longCmd := "rm -rf dist/" + strings.Repeat("x", 300)
+	policy := &Policy{
+		Mode:    ModeStrict,
+		WorkDir: workDir,
+		Shell: &ShellPolicy{
+			BlockPatterns:   DefaultShellBlockPatterns(),
+			ApprovePatterns: DefaultShellApprovePatterns(),
+		},
+		Path:       &PathPolicy{},
+		ApproveFunc: func(action string) bool { return false },
+	}
+	sb := NewSandbox(policy)
+	result := sb.Check("shell", map[string]string{"command": longCmd})
+	if result.Allow {
+		t.Error("expected not allowed when approval denied")
+	}
+	if result.ApprovalAction == "" {
+		t.Error("ApprovalAction should be set")
+	}
+	if !strings.Contains(result.ApprovalAction, "...") {
+		t.Error("ApprovalAction should contain truncated command with ...")
+	}
+}
+
+func TestSandbox_Check_ListDirEmptyPath(t *testing.T) {
+	workDir := t.TempDir()
+	policy := &Policy{
+		Mode:    ModeNormal,
+		WorkDir: workDir,
+		Shell:   &ShellPolicy{},
+		Path:    &PathPolicy{},
+	}
+	sb := NewSandbox(policy)
+	result := sb.Check("list_dir", map[string]string{})
+	if !result.Allow {
+		t.Errorf("list_dir with empty path uses .: %v", result.DenyErr)
+	}
+}
+
+func TestValidatePath_AllowOutsideWorkdirWithTilde(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("UserHomeDir not available")
+	}
+	allowedDir := filepath.Join(home, "allowed_outside_test")
+	if err := os.MkdirAll(allowedDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(allowedDir)
+
+	workDir := filepath.Join(home, "proj_outside_test")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(workDir)
+
+	policy := &PathPolicy{
+		AllowOutsideWorkdir: []string{"~/allowed_outside_test"},
+	}
+	targetPath := filepath.Join("..", "allowed_outside_test", "file.txt")
+	err = ValidatePath(workDir, targetPath, policy)
+	if err != nil {
+		t.Errorf("path under ~/allowed_outside_test should be allowed: %v", err)
+	}
 }
