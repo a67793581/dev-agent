@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -245,5 +246,94 @@ func TestParseCommands_WriteFileWithNewlines(t *testing.T) {
 	}
 	if cmds[0].Name != "write_file" {
 		t.Errorf("command = %q, want %q", cmds[0].Name, "write_file")
+	}
+}
+
+func TestParseCommands_Array(t *testing.T) {
+	input := "```json\n" + `[{"command": "read_file", "args": {"path": "a.go"}, "reason": ""}, {"command": "write_file", "args": {"path": "b.go", "content": "x"}, "reason": ""}]` + "\n```"
+	cmds, _, err := ParseCommands(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cmds) != 2 {
+		t.Fatalf("got %d commands, want 2", len(cmds))
+	}
+	if cmds[0].Name != "read_file" || cmds[1].Name != "write_file" {
+		t.Errorf("commands = %q, %q", cmds[0].Name, cmds[1].Name)
+	}
+}
+
+func TestParseCommands_ArrayInvalidFallbackToSingle(t *testing.T) {
+	// Invalid JSON array, repair fixes to single object
+	input := "```json\n" + `{"command": "done", "args": {"summary": "ok"}, "reason": ""}` + "\n```"
+	cmds, _, err := ParseCommands(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cmds) != 1 || cmds[0].Name != "done" {
+		t.Errorf("got %d commands or wrong name", len(cmds))
+	}
+}
+
+func TestParseCommands_InvalidSingleCommand(t *testing.T) {
+	input := "```json\n" + `{invalid}` + "\n```"
+	_, _, err := ParseCommands(input)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestParseCommands_ArrayInvalidThenSingleFails(t *testing.T) {
+	input := "```json\n" + `[}]` + "\n```"
+	_, _, err := ParseCommands(input)
+	if err == nil {
+		t.Fatal("expected error when array invalid and single parse also fails")
+	}
+}
+
+func TestParseAllCodeBlocks(t *testing.T) {
+	text := "```go\npackage main\n```\n\n```python\nprint(1)\n```\n\n```\nno lang\n```"
+	blocks := ParseAllCodeBlocks(text)
+	if len(blocks) != 3 {
+		t.Fatalf("got %d blocks, want 3", len(blocks))
+	}
+	if blocks["go"] != "package main" {
+		t.Errorf("go block = %q", blocks["go"])
+	}
+	if blocks["python"] != "print(1)" {
+		t.Errorf("python block = %q", blocks["python"])
+	}
+	if _, ok := blocks["block_2"]; !ok {
+		t.Errorf("expected block_2 for empty lang: %v", blocks)
+	}
+}
+
+func TestRepairJSON_MissingBracketAndTab(t *testing.T) {
+	// repairJSON adds ] when [ count > ] count
+	input := `[{"command": "shell", "args": {"command": "echo"}}`
+	got := repairJSON(input)
+	if got == "" {
+		t.Error("repairJSON returned empty")
+	}
+	if strings.Count(got, "]") <= strings.Count(input, "]") {
+		t.Error("repairJSON should add ] when [ count > ] count")
+	}
+	// Tab replacement
+	input2 := "{\"x\":\"a\tb\"}"
+	got2 := repairJSON(input2)
+	if strings.Contains(got2, "\t") {
+		t.Error("repairJSON should replace tab with \\t")
+	}
+}
+
+func TestRepairJSON_TrailingCommaBeforeBracket(t *testing.T) {
+	input := `{"command": "x", "args": {}, }`
+	got := repairJSON(input)
+	if got == "" {
+		t.Error("repairJSON returned empty")
+	}
+	// Should remove trailing comma before }
+	if strings.HasSuffix(got, ", }") {
+		t.Error("trailing comma before } should be removed")
 	}
 }
