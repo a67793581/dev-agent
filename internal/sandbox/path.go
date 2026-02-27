@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,11 +70,19 @@ func resolvePath(workDir, p string) string {
 
 func expandHome(p string) string {
 	if p == "~" {
-		home, _ := os.UserHomeDir()
+		home, err := os.UserHomeDir()
+		if err != nil {
+			log.Printf("sandbox: cannot expand ~ (UserHomeDir: %v), skipping path", err)
+			return ""
+		}
 		return home
 	}
 	if strings.HasPrefix(p, "~/") {
-		home, _ := os.UserHomeDir()
+		home, err := os.UserHomeDir()
+		if err != nil {
+			log.Printf("sandbox: cannot expand ~ (UserHomeDir: %v), skipping path %q", err, p)
+			return ""
+		}
 		return filepath.Join(home, p[2:])
 	}
 	return p

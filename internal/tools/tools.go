@@ -50,9 +50,14 @@ func (r *Registry) Execute(name string, args map[string]string) Result {
 	if r.sandbox != nil {
 		result := r.sandbox.Check(name, args)
 		if !result.Allow {
-			out := "blocked by sandbox"
+			var out string
 			if result.DenyErr != nil {
 				out = fmt.Sprintf("blocked by sandbox: %v", result.DenyErr)
+			} else {
+				out = "blocked by sandbox"
+			}
+			if result.ApprovalAction != "" {
+				out = out + "\n" + result.ApprovalAction
 			}
 			return Result{Success: false, Output: out}
 		}
