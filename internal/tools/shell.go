@@ -3,6 +3,7 @@ package tools
 import (
 	"bytes"
 	"context"
+	"devagent/internal/sandbox"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -10,7 +11,8 @@ import (
 )
 
 type ShellTool struct {
-	workDir string
+	workDir  string
+	docker   *sandbox.DockerExecutor // nil means direct execution
 }
 
 func (t *ShellTool) Name() string { return "shell" }
@@ -21,6 +23,29 @@ func (t *ShellTool) Execute(args map[string]string) Result {
 		return Result{Success: false, Output: "empty command"}
 	}
 
+	if t.docker != nil {
+		return t.executeDocker(command)
+	}
+	return t.executeDirect(command)
+}
+
+func (t *ShellTool) executeDocker(command string) Result {
+	output, exitCode, err := t.docker.Execute(command)
+	output = truncateOutput(output)
+
+	if err != nil {
+		return Result{Success: false, Output: fmt.Sprintf("[docker] %v\n%s", err, output)}
+	}
+	if exitCode != 0 {
+		return Result{Success: false, Output: fmt.Sprintf("[docker] exit code: %d\n%s", exitCode, output)}
+	}
+	if output == "" {
+		output = "(no output)"
+	}
+	return Result{Success: true, Output: output}
+}
+
+func (t *ShellTool) executeDirect(command string) Result {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -45,12 +70,7 @@ func (t *ShellTool) Execute(args map[string]string) Result {
 		sb.WriteString(stderr.String())
 	}
 
-	output := sb.String()
-	const maxLen = 16000
-	if len(output) > maxLen {
-		half := maxLen / 2
-		output = output[:half] + "\n\n... (output truncated) ...\n\n" + output[len(output)-half:]
-	}
+	output := truncateOutput(sb.String())
 
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -63,6 +83,15 @@ func (t *ShellTool) Execute(args map[string]string) Result {
 		output = "(no output)"
 	}
 	return Result{Success: true, Output: output}
+}
+
+func truncateOutput(output string) string {
+	const maxLen = 16000
+	if len(output) > maxLen {
+		half := maxLen / 2
+		output = output[:half] + "\n\n... (output truncated) ...\n\n" + output[len(output)-half:]
+	}
+	return output
 }
 
 type GrepTool struct {

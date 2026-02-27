@@ -20,31 +20,40 @@ const (
 	maxHistoryMsgs = 40
 )
 
+const containerWorkspace = "/workspace"
+
 type Agent struct {
-	client    *llm.Client
-	registry  *tools.Registry
-	workDir   string
-	verbose   bool
-	skillDirs []string
-	soul      string
+	client     *llm.Client
+	registry   *tools.Registry
+	workDir    string
+	displayDir string // path shown to LLM: workDir or /workspace in Docker mode
+	verbose    bool
+	skillDirs  []string
+	soul       string
 	guidelines string
 
 	messages   []llm.Message
 	totalUsage llm.Usage
 }
 
-func New(client *llm.Client, workDir string, verbose bool, skillDirs []string, soul, guidelines string, sb *sandbox.Sandbox) *Agent {
-	reg := tools.DefaultRegistry(workDir)
+func New(client *llm.Client, workDir string, verbose bool, skillDirs []string, soul, guidelines string, sb *sandbox.Sandbox, dockerExec *sandbox.DockerExecutor) *Agent {
+	reg := tools.DefaultRegistry(workDir, dockerExec)
 	if sb != nil {
 		reg.SetSandbox(sb)
 	}
+	displayDir := workDir
+	if dockerExec != nil {
+		displayDir = containerWorkspace
+		reg.SetContainerPath(workDir, containerWorkspace)
+	}
 	return &Agent{
 		client:     client,
-		registry:  reg,
-		workDir:   workDir,
-		verbose:   verbose,
-		skillDirs: skillDirs,
-		soul:      soul,
+		registry:   reg,
+		workDir:    workDir,
+		displayDir: displayDir,
+		verbose:    verbose,
+		skillDirs:  skillDirs,
+		soul:       soul,
 		guidelines: guidelines,
 	}
 }
@@ -67,7 +76,7 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 	for i := range skills {
 		meta[i] = prompt.SkillMeta{Name: skills[i].Name, Description: skills[i].Description}
 	}
-	userContent := prompt.BuildProjectContext(a.workDir, fileTree) + "\n\n" + prompt.BuildUserTask(task) + prompt.BuildSkillsContext(meta)
+	userContent := prompt.BuildProjectContext(a.displayDir, fileTree) + "\n\n" + prompt.BuildUserTask(task) + prompt.BuildSkillsContext(meta)
 	systemContent := prompt.BuildSystemPrompt(a.soul, a.guidelines)
 	a.messages = []llm.Message{
 		{Role: "system", Content: systemContent},

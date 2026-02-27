@@ -32,42 +32,24 @@ func main() {
 	showVersion := flag.Bool("version", false, "Show version")
 	taskFlag := flag.String("task", "", "Task to execute (if empty, enters interactive mode)")
 	skillsFlag := flag.String("skills", "", "Comma-separated paths to additional skill directories (default: <project>/.devagent/skills and ~/.devagent/skills)")
-	sandboxFlag := flag.String("sandbox", "normal", "Sandbox mode: permissive (block only dangerous) / normal (block + confirm high risk) / strict (confirm high+medium and writes)")
-	soulFlag := flag.String("soul", "", "Path to custom soul/identity prompt file (default: .devagent/SOUL.md in project or home)")
-	guidelinesFlag := flag.String("guidelines", "", "Path to custom guidelines prompt file (default: .devagent/GUIDELINES.md in project or home)")
+	sandboxFlag := flag.String("sandbox", "normal", "Sandbox mode: permissive / normal / strict")
+	noDockerFlag := flag.Bool("no-docker", false, "Disable Docker sandbox for shell commands")
+	langFlag := flag.String("lang", "", "UI language: en / zh (default: auto-detect from LANG env)")
+	soulFlag := flag.String("soul", "", "Path to custom soul/identity prompt file")
+	guidelinesFlag := flag.String("guidelines", "", "Path to custom guidelines prompt file")
 
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, `DevAgent v%s - AI-powered programming agent
-
-Usage:
-  devagent [flags]
-
-Flags:
-`, version)
-		flag.PrintDefaults()
-		fmt.Fprintf(os.Stderr, `
-Environment Variables (can be set in .env file):
-  OPENAI_API_KEY    OpenAI API key (required)
-  OPENAI_BASE_URL   API base URL (optional)
-  OPENAI_MODEL      Model name (optional, default: gpt-4o)
-
-.env file lookup order (first found wins, existing env vars are never overwritten):
-  1. File specified by -env flag
-  2. .env in current working directory
-  3. ~/.devagent.env in home directory
-
-Examples:
-  devagent -project ./myapp -task "add error handling to all API endpoints"
-  devagent -project ./myapp                       # interactive mode
-  devagent -project ./myapp -verbose              # verbose output
-  devagent -env /path/to/.env -project ./myapp    # custom env file
-  devagent -skills /path/to/skills,/other/skills  # additional skill directories
-  devagent -sandbox strict   # require confirmation for risky and write operations
-  devagent -soul ./SOUL.md -guidelines ./GUIDELINES.md  # custom prompt files
-`)
+		lang := detectLang(*langFlag)
+		if lang == "zh" {
+			printUsageZh()
+		} else {
+			printUsageEn()
+		}
 	}
 
 	flag.Parse()
+
+	lang := detectLang(*langFlag)
 
 	if *showVersion {
 		fmt.Printf("DevAgent v%s\n", version)
@@ -105,11 +87,15 @@ Examples:
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	var dockerExec *sandbox.DockerExecutor
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
 		fmt.Println("\n\n⚠️  Interrupted. Shutting down...")
+		if dockerExec != nil {
+			dockerExec.Stop()
+		}
 		cancel()
 	}()
 
@@ -126,6 +112,23 @@ Examples:
 	approveFunc := sandbox.ApproveFuncFor(interactive)
 	sb := sandbox.NewSandboxFromConfig(absProject, sandboxCfg, cliMode, approveFunc)
 
+	dockerCfg := sandbox.DockerConfig{}
+	if sandboxCfg != nil {
+		dockerCfg = sandboxCfg.Docker
+	}
+	if *noDockerFlag {
+		enabled := false
+		dockerCfg.Enabled = &enabled
+	}
+	if dockerCfg.DockerEnabled() {
+		if sandbox.DockerAvailable() {
+			dockerExec = sandbox.NewDockerExecutor(absProject, dockerCfg)
+			fmt.Printf("🐳 Docker sandbox enabled (container: %s)\n", dockerExec.ContainerName())
+		} else {
+			fmt.Fprintln(os.Stderr, "⚠️  Docker not available, falling back to direct shell execution")
+		}
+	}
+
 	skillDirs := buildSkillDirs(absProject, *skillsFlag)
 	soul := prompt.ResolvePromptFile(*soulFlag, absProject, "SOUL.md")
 	guidelines := prompt.ResolvePromptFile(*guidelinesFlag, absProject, "GUIDELINES.md")
@@ -135,16 +138,23 @@ Examples:
 	if *guidelinesFlag != "" && guidelines == "" {
 		fmt.Fprintf(os.Stderr, "⚠️  Guidelines file not found or unreadable: %s\n", *guidelinesFlag)
 	}
-	ag := agent.New(client, absProject, *verbose, skillDirs, soul, guidelines, sb)
+	ag := agent.New(client, absProject, *verbose, skillDirs, soul, guidelines, sb, dockerExec)
 
 	if *taskFlag != "" {
-		if err := ag.Run(ctx, *taskFlag); err != nil {
+		err := ag.Run(ctx, *taskFlag)
+		if dockerExec != nil {
+			dockerExec.Stop()
+		}
+		if err != nil {
 			fatalf("agent error: %v", err)
 		}
 		return
 	}
 
-	runInteractive(ctx, ag, absProject, skillDirs, soul, guidelines, sb)
+	runInteractive(ctx, ag, absProject, skillDirs, soul, guidelines, sb, dockerExec, lang)
+	if dockerExec != nil {
+		dockerExec.Stop()
+	}
 }
 
 func buildSkillDirs(projectDir, skillsFlag string) []string {
@@ -166,8 +176,21 @@ func buildSkillDirs(projectDir, skillsFlag string) []string {
 	return dirs
 }
 
-func runInteractive(ctx context.Context, ag *agent.Agent, projectDir string, skillDirs []string, soul, guidelines string, sb *sandbox.Sandbox) {
-	fmt.Printf(`
+func runInteractive(ctx context.Context, ag *agent.Agent, projectDir string, skillDirs []string, soul, guidelines string, sb *sandbox.Sandbox, dockerExec *sandbox.DockerExecutor, lang string) {
+	if lang == "zh" {
+		fmt.Printf(`
+╔══════════════════════════════════════════════════╗
+║          DevAgent v%s - 交互模式               ║
+╠══════════════════════════════════════════════════╣
+║  项目: %-39s ║
+║                                                  ║
+║  输入任务后按回车执行                              ║
+║  输入 quit 或 exit 退出                           ║
+║  输入 help 查看帮助                               ║
+╚══════════════════════════════════════════════════╝
+`, version, truncatePath(projectDir, 39))
+	} else {
+		fmt.Printf(`
 ╔══════════════════════════════════════════════════╗
 ║          DevAgent v%s - Interactive Mode        ║
 ╠══════════════════════════════════════════════════╣
@@ -178,6 +201,7 @@ func runInteractive(ctx context.Context, ag *agent.Agent, projectDir string, ski
 ║  Type 'help' for available commands.             ║
 ╚══════════════════════════════════════════════════╝
 `, version, truncatePath(projectDir, 38))
+	}
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
@@ -193,14 +217,18 @@ func runInteractive(ctx context.Context, ag *agent.Agent, projectDir string, ski
 
 		switch strings.ToLower(input) {
 		case "quit", "exit", "q":
-			fmt.Println("Goodbye!")
+			if lang == "zh" {
+				fmt.Println("再见!")
+			} else {
+				fmt.Println("Goodbye!")
+			}
 			return
 		case "help", "h":
-			printHelp()
+			printHelp(lang)
 			continue
 		}
 
-		newAgent := agent.New(ag.LLMClient(), projectDir, ag.Verbose(), skillDirs, soul, guidelines, sb)
+		newAgent := agent.New(ag.LLMClient(), projectDir, ag.Verbose(), skillDirs, soul, guidelines, sb, dockerExec)
 
 		if err := newAgent.Run(ctx, input); err != nil {
 			fmt.Printf("❌ Error: %v\n", err)
@@ -208,8 +236,22 @@ func runInteractive(ctx context.Context, ag *agent.Agent, projectDir string, ski
 	}
 }
 
-func printHelp() {
-	fmt.Print(`
+func printHelp(lang string) {
+	if lang == "zh" {
+		fmt.Print(`
+可用命令:
+  help, h        显示帮助
+  quit, exit, q  退出程序
+
+任务示例:
+  "分析项目结构并解释架构"
+  "修复 main.go 中的错误处理问题"
+  "为 utils 包添加单元测试"
+  "重构数据库层，使用连接池"
+  "安装 golangci-lint 并运行代码检查"
+`)
+	} else {
+		fmt.Print(`
 Available commands:
   help, h        Show this help
   quit, exit, q  Exit the program
@@ -220,6 +262,93 @@ Task examples:
   "Add unit tests for the utils package"
   "Refactor the database layer to use connection pooling"
   "Install golangci-lint and run it on this project"
+`)
+	}
+}
+
+func detectLang(flagVal string) string {
+	if flagVal != "" {
+		if strings.HasPrefix(strings.ToLower(flagVal), "zh") {
+			return "zh"
+		}
+		return "en"
+	}
+	envLang := os.Getenv("LANG")
+	if strings.HasPrefix(strings.ToLower(envLang), "zh") {
+		return "zh"
+	}
+	return "en"
+}
+
+func printUsageEn() {
+	fmt.Fprintf(os.Stderr, `DevAgent v%s - AI-powered programming agent
+
+Usage:
+  devagent [flags]
+
+Flags:
+`, version)
+	flag.PrintDefaults()
+	fmt.Fprintf(os.Stderr, `
+Environment Variables (can be set in .env file):
+  OPENAI_API_KEY    OpenAI API key (required)
+  OPENAI_BASE_URL   API base URL (optional)
+  OPENAI_MODEL      Model name (optional, default: gpt-4o)
+
+Sandbox Modes:
+  permissive   Block only dangerous commands (sudo, rm -rf /, etc.)
+  normal       Block dangerous + require confirmation for high-risk operations (default)
+  strict       Require confirmation for all write operations and medium/high-risk commands
+
+Docker Sandbox:
+  Shell commands run inside a persistent Docker container per project.
+  The container is reused across commands and stopped on exit.
+  Use -no-docker to disable, or configure in .devagent/sandbox.yaml.
+
+Examples:
+  devagent -project ./myapp -task "add error handling"
+  devagent -project ./myapp                               # interactive mode
+  devagent -project ./myapp -verbose                      # verbose output
+  devagent -sandbox strict                                # strict sandbox
+  devagent -no-docker                                     # disable Docker sandbox
+  devagent -lang zh                                       # Chinese UI
+  devagent -soul ./SOUL.md -guidelines ./GUIDELINES.md    # custom prompts
+`)
+}
+
+func printUsageZh() {
+	fmt.Fprintf(os.Stderr, `DevAgent v%s - AI 驱动的编程 Agent
+
+用法:
+  devagent [参数]
+
+参数:
+`, version)
+	flag.PrintDefaults()
+	fmt.Fprintf(os.Stderr, `
+环境变量 (可在 .env 文件中设置):
+  OPENAI_API_KEY    OpenAI API 密钥 (必需)
+  OPENAI_BASE_URL   API 基础 URL (可选)
+  OPENAI_MODEL      模型名称 (可选, 默认: gpt-4o)
+
+沙箱模式:
+  permissive   仅拦截危险命令 (sudo, rm -rf / 等)
+  normal       拦截危险命令 + 高风险操作需确认 (默认)
+  strict       所有写操作和中/高风险命令均需确认
+
+Docker 沙箱:
+  Shell 命令在每个项目独立的持久 Docker 容器内执行。
+  容器在命令间复用, 进程退出时停止 (下次自动恢复)。
+  使用 -no-docker 禁用, 或在 .devagent/sandbox.yaml 中配置。
+
+示例:
+  devagent -project ./myapp -task "添加错误处理"
+  devagent -project ./myapp                               # 交互模式
+  devagent -project ./myapp -verbose                      # 详细输出
+  devagent -sandbox strict                                # 严格沙箱
+  devagent -no-docker                                     # 禁用 Docker 沙箱
+  devagent -lang en                                       # 英文界面
+  devagent -soul ./SOUL.md -guidelines ./GUIDELINES.md    # 自定义提示词
 `)
 }
 

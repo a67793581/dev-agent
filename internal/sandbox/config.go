@@ -14,9 +14,10 @@ const (
 
 // Config is the root structure for .devagent/sandbox.yaml.
 type Config struct {
-	Mode  string       `yaml:"mode"`
-	Shell ShellConfig  `yaml:"shell"`
-	Paths PathsConfig  `yaml:"paths"`
+	Mode   string       `yaml:"mode"`
+	Shell  ShellConfig  `yaml:"shell"`
+	Paths  PathsConfig  `yaml:"paths"`
+	Docker DockerConfig `yaml:"docker"`
 }
 
 // ShellConfig holds shell block/approve/allow pattern lists (strings are glob-like patterns).
@@ -30,6 +31,31 @@ type ShellConfig struct {
 type PathsConfig struct {
 	Deny                []string `yaml:"deny"`
 	AllowOutsideWorkdir []string `yaml:"allow_outside_workdir"`
+}
+
+// DockerConfig controls the Docker container sandbox for shell commands.
+type DockerConfig struct {
+	Enabled     *bool         `yaml:"enabled"`
+	Image       string        `yaml:"image"`
+	Network     string        `yaml:"network"`
+	Memory      string        `yaml:"memory"`
+	CPUs        string        `yaml:"cpus"`
+	ExtraMounts []MountConfig `yaml:"extra_mounts"`
+}
+
+// MountConfig describes an additional volume mount for the Docker container.
+type MountConfig struct {
+	Source   string `yaml:"source"`
+	Target   string `yaml:"target"`
+	ReadOnly bool   `yaml:"readonly"`
+}
+
+// DockerEnabled returns whether Docker sandbox is enabled (defaults to true).
+func (c *DockerConfig) DockerEnabled() bool {
+	if c.Enabled == nil {
+		return true
+	}
+	return *c.Enabled
 }
 
 // LoadConfig looks for <projectDir>/.devagent/sandbox.yaml and loads it.
