@@ -118,7 +118,9 @@ Examples:
 	if *sandboxFlag != "" {
 		cliMode = *sandboxFlag
 	}
-	sb := sandbox.NewSandboxFromConfig(absProject, sandboxCfg, cliMode, sandbox.TerminalApproval())
+	interactive := *taskFlag == ""
+	approveFunc := sandbox.ApproveFuncFor(interactive)
+	sb := sandbox.NewSandboxFromConfig(absProject, sandboxCfg, cliMode, approveFunc)
 
 	skillDirs := buildSkillDirs(absProject, *skillsFlag)
 	ag := agent.New(client, absProject, *verbose, skillDirs, sb)

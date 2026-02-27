@@ -38,19 +38,18 @@ func ValidatePath(workDir, targetPath string, pathPolicy *PathPolicy) error {
 		}
 		return fmt.Errorf("path %q escapes sandbox (workDir: %s)", targetPath, absWork)
 	}
-	// Build canonical path for deny/allow checks (resolve workDir symlinks so we have a stable base)
-	canonicalWork, _ := filepath.EvalSymlinks(absWork)
-	if canonicalWork == "" {
-		canonicalWork = absWork
+	// Resolve symlinks for deny check so that paths under workDir that are symlinks to
+	// sensitive dirs (e.g. project/link_to_etc -> /etc) are still denied.
+	canonicalForDeny := absResolved
+	if resolved, err := filepath.EvalSymlinks(absResolved); err == nil {
+		canonicalForDeny = resolved
 	}
-	absReal := filepath.Join(canonicalWork, rel)
-	// Allow if in allow_outside_workdir (path was inside workDir, so skip this for normal case)
 	// Deny sensitive paths even inside workDir (e.g. project contains /etc symlink)
 	if pathPolicy != nil && len(pathPolicy.Deny) > 0 {
 		for _, deny := range pathPolicy.Deny {
 			denyAbs := expandHome(deny)
 			denyAbs, _ = filepath.Abs(denyAbs)
-			if denyAbs != "" && (absReal == denyAbs || strings.HasPrefix(absReal, denyAbs+string(filepath.Separator))) {
+			if denyAbs != "" && (canonicalForDeny == denyAbs || strings.HasPrefix(canonicalForDeny, denyAbs+string(filepath.Separator))) {
 				return fmt.Errorf("path %q is denied by policy", targetPath)
 			}
 		}

@@ -154,20 +154,20 @@ func (s *Sandbox) Check(toolName string, args map[string]string) CheckResult {
 				if s.policy.ApproveFunc != nil && s.policy.ApproveFunc(action) {
 					return CheckResult{Allow: true}
 				}
-				return CheckResult{Allow: false, DenyErr: ErrNeedsApproval}
+				return CheckResult{Allow: false, DenyErr: ErrNeedsApproval, ApprovalAction: action}
 			}
 			// ModeNormal
 			if s.policy.ApproveFunc != nil && s.policy.ApproveFunc(action) {
 				return CheckResult{Allow: true}
 			}
-			return CheckResult{Allow: false, DenyErr: ErrNeedsApproval}
+			return CheckResult{Allow: false, DenyErr: ErrNeedsApproval, ApprovalAction: action}
 		case RiskMedium:
 			if s.policy.Mode == ModeStrict {
 				action := fmt.Sprintf("⚠️  Agent wants to execute: %s\n   Risk: MEDIUM\n   Allow? [y/N]: ", truncateForPrompt(cmd, 200))
 				if s.policy.ApproveFunc != nil && s.policy.ApproveFunc(action) {
 					return CheckResult{Allow: true}
 				}
-				return CheckResult{Allow: false, DenyErr: ErrNeedsApproval}
+				return CheckResult{Allow: false, DenyErr: ErrNeedsApproval, ApprovalAction: action}
 			}
 			return CheckResult{Allow: true}
 		default:
@@ -182,7 +182,7 @@ func (s *Sandbox) Check(toolName string, args map[string]string) CheckResult {
 		if s.policy.ApproveFunc != nil && s.policy.ApproveFunc(action) {
 			return CheckResult{Allow: true}
 		}
-		return CheckResult{Allow: false, DenyErr: ErrNeedsApproval}
+		return CheckResult{Allow: false, DenyErr: ErrNeedsApproval, ApprovalAction: action}
 	}
 
 	return CheckResult{Allow: true}
