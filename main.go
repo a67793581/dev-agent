@@ -7,8 +7,10 @@ import (
 	"devagent/internal/config"
 	"devagent/internal/llm"
 	"devagent/internal/prompt"
+	"devagent/internal/sandbox"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -30,6 +32,7 @@ func main() {
 	showVersion := flag.Bool("version", false, "Show version")
 	taskFlag := flag.String("task", "", "Task to execute (if empty, enters interactive mode)")
 	skillsFlag := flag.String("skills", "", "Comma-separated paths to additional skill directories (default: <project>/.devagent/skills and ~/.devagent/skills)")
+	sandboxFlag := flag.String("sandbox", "normal", "Sandbox mode: permissive (block only dangerous) / normal (block + confirm high risk) / strict (confirm high+medium and writes)")
 	soulFlag := flag.String("soul", "", "Path to custom soul/identity prompt file (default: .devagent/SOUL.md in project or home)")
 	guidelinesFlag := flag.String("guidelines", "", "Path to custom guidelines prompt file (default: .devagent/GUIDELINES.md in project or home)")
 
@@ -59,6 +62,7 @@ Examples:
   devagent -project ./myapp -verbose              # verbose output
   devagent -env /path/to/.env -project ./myapp    # custom env file
   devagent -skills /path/to/skills,/other/skills  # additional skill directories
+  devagent -sandbox strict   # require confirmation for risky and write operations
   devagent -soul ./SOUL.md -guidelines ./GUIDELINES.md  # custom prompt files
 `)
 	}
@@ -109,6 +113,19 @@ Examples:
 		cancel()
 	}()
 
+	sandboxCfg, err := sandbox.LoadConfig(absProject)
+	if err != nil {
+		log.Printf("Warning: loading sandbox config: %v (using defaults)", err)
+		sandboxCfg = nil
+	}
+	cliMode := ""
+	if *sandboxFlag != "" {
+		cliMode = *sandboxFlag
+	}
+	interactive := *taskFlag == ""
+	approveFunc := sandbox.ApproveFuncFor(interactive)
+	sb := sandbox.NewSandboxFromConfig(absProject, sandboxCfg, cliMode, approveFunc)
+
 	skillDirs := buildSkillDirs(absProject, *skillsFlag)
 	soul := prompt.ResolvePromptFile(*soulFlag, absProject, "SOUL.md")
 	guidelines := prompt.ResolvePromptFile(*guidelinesFlag, absProject, "GUIDELINES.md")
@@ -118,7 +135,7 @@ Examples:
 	if *guidelinesFlag != "" && guidelines == "" {
 		fmt.Fprintf(os.Stderr, "⚠️  Guidelines file not found or unreadable: %s\n", *guidelinesFlag)
 	}
-	ag := agent.New(client, absProject, *verbose, skillDirs, soul, guidelines)
+	ag := agent.New(client, absProject, *verbose, skillDirs, soul, guidelines, sb)
 
 	if *taskFlag != "" {
 		if err := ag.Run(ctx, *taskFlag); err != nil {
@@ -127,7 +144,7 @@ Examples:
 		return
 	}
 
-	runInteractive(ctx, ag, absProject, skillDirs, soul, guidelines)
+	runInteractive(ctx, ag, absProject, skillDirs, soul, guidelines, sb)
 }
 
 func buildSkillDirs(projectDir, skillsFlag string) []string {
@@ -149,7 +166,7 @@ func buildSkillDirs(projectDir, skillsFlag string) []string {
 	return dirs
 }
 
-func runInteractive(ctx context.Context, ag *agent.Agent, projectDir string, skillDirs []string, soul, guidelines string) {
+func runInteractive(ctx context.Context, ag *agent.Agent, projectDir string, skillDirs []string, soul, guidelines string, sb *sandbox.Sandbox) {
 	fmt.Printf(`
 ╔══════════════════════════════════════════════════╗
 ║          DevAgent v%s - Interactive Mode        ║
@@ -183,7 +200,7 @@ func runInteractive(ctx context.Context, ag *agent.Agent, projectDir string, ski
 			continue
 		}
 
-		newAgent := agent.New(ag.LLMClient(), projectDir, ag.Verbose(), skillDirs, soul, guidelines)
+		newAgent := agent.New(ag.LLMClient(), projectDir, ag.Verbose(), skillDirs, soul, guidelines, sb)
 
 		if err := newAgent.Run(ctx, input); err != nil {
 			fmt.Printf("❌ Error: %v\n", err)
