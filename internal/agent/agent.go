@@ -136,10 +136,10 @@ func (a *Agent) Run(ctx context.Context, task string) error {
 			}
 			if a.verbose {
 				for k, v := range cmd.Args {
-					display := v
-					if len(display) > 200 {
-						display = display[:200] + "..."
-					}
+				display := v
+				if r := []rune(display); len(r) > 200 {
+					display = string(r[:200]) + "..."
+				}
 					fmt.Printf("   %s: %s\n", k, display)
 				}
 			}
@@ -309,8 +309,9 @@ func statusIcon(success bool) string {
 }
 
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	return string(runes[:maxLen]) + "..."
 }

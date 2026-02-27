@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"devagent/internal/agent"
 	"devagent/internal/config"
@@ -10,12 +9,16 @@ import (
 	"devagent/internal/sandbox"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"github.com/chzyer/readline"
+	"github.com/mattn/go-runewidth"
 )
 
 var (
@@ -203,14 +206,38 @@ func runInteractive(ctx context.Context, ag *agent.Agent, projectDir string, ski
 `, version, truncatePath(projectDir, 38))
 	}
 
-	scanner := bufio.NewScanner(os.Stdin)
+	historyFile := ""
+	if home, err := os.UserHomeDir(); err == nil {
+		historyFile = filepath.Join(home, ".devagent_history")
+	}
+
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          "🤖 > ",
+		HistoryFile:     historyFile,
+		InterruptPrompt: "^C",
+		EOFPrompt:       "exit",
+	})
+	if err != nil {
+		log.Printf("Warning: readline init failed: %v, falling back to basic input", err)
+		return
+	}
+	defer rl.Close()
+
 	for {
-		fmt.Print("\n🤖 > ")
-		if !scanner.Scan() {
-			break
+		fmt.Println()
+		line, err := rl.Readline()
+		if err != nil {
+			if err == readline.ErrInterrupt || err == io.EOF {
+				if lang == "zh" {
+					fmt.Println("再见!")
+				} else {
+					fmt.Println("Goodbye!")
+				}
+			}
+			return
 		}
 
-		input := strings.TrimSpace(scanner.Text())
+		input := strings.TrimSpace(line)
 		if input == "" {
 			continue
 		}
@@ -352,11 +379,26 @@ Docker 沙箱:
 `)
 }
 
-func truncatePath(p string, maxLen int) string {
-	if len(p) <= maxLen {
+func truncatePath(p string, maxWidth int) string {
+	if runewidth.StringWidth(p) <= maxWidth {
 		return p
 	}
-	return "..." + p[len(p)-maxLen+3:]
+	runes := []rune(p)
+	prefix := "..."
+	prefixW := 3
+	for i := len(runes) - 1; i >= 0; i-- {
+		tail := string(runes[i:])
+		if runewidth.StringWidth(tail)+prefixW > maxWidth {
+			tail = string(runes[i+1:])
+			w := runewidth.StringWidth(tail) + prefixW
+			pad := ""
+			if w < maxWidth {
+				pad = strings.Repeat(" ", maxWidth-w)
+			}
+			return prefix + tail + pad
+		}
+	}
+	return p
 }
 
 func fatalf(format string, args ...interface{}) {
